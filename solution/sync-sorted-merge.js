@@ -1,4 +1,7 @@
 'use strict'
+var BinaryHeap = require("./BinaryHeap")
+var common = require("./common")
+
 /*
 ToDo: If we want to handle larger datasets, need to persist data, break down
 into chunks and merge sort from there...like EXTERNAL MERGE SORT.
@@ -10,11 +13,6 @@ For now, we do in-memory storage to handle logs on a smaller scale.
 :)
 
 */
-
-// Type 1: In-memory only datastore (no need to load the database)
-var Datastore = require('nedb')
-var db = new Datastore();
-
 
 /** FOR REFERENCE:
  * Challenge Number 1!
@@ -39,33 +37,60 @@ var db = new Datastore();
 module.exports = (logSources, printer) => {
 	//throw new Error('Not implemented yet!  That part is up to you!')
 
-	function printLogs(logEntries, printer) {
-		for (var j = 0; j < logEntries.length; j++) {
-			printer.print(logEntries[j]);
-		}
+	//sorted logs
+	var result = [];
 
-		printer.done();
-	}
-
-	// push log entries into db
-	for (var i = 0; i < logSources.length; ++i) {
-		// get all log entries
-		var logEntries = [];
-		var logEntry = logSources[i].pop();
-		while (logEntry) {
-			logEntries.push(logEntry);
-			logEntry = logSources[i].pop();
-		}
-		// insert range
-		db.insert(logEntries);
-	}
-
-	//print log entries
-	db.find({}).sort({ date: 1 }).exec(function (err, docs) {
-		if (err) {
-			console.error(err)
-		}
-		//print logs
-		printLogs(docs, printer);
+	// we initialize a new min-heap to sort in-memory.
+	//we pass in a score function that returns a value to be compared.
+	//recordContainer, contains the current record and index of the file
+	//the record came from
+	//recordContainer = { record: ${logEntry}, sourceIndex: ${indexOfLogSource} }
+	var minHeap = new BinaryHeap(
+		function(recordContainer) {
+			return recordContainer.record.date;
 	});
+	// pop off the first log entry from each log sources
+	for (var i = 0; i < logSources.length; i++) {
+		minHeap.push({ record: logSources[i].pop(), sourceIndex: i });
+	}
+
+	/*
+		ToDo: For supporting more data, need to:
+			1. Allocate max amount of memory space sorting in-memory
+				 with Min-Heap
+			2. If a lot of LogSources, need to break into chunks or files
+			3. Merge all chunks into one HUMUNGO file, sorted
+			4. Read and print results!
+
+			Spent too much time on this...moving on.
+	*/
+	//console.log(minHeap.content);
+	//Now get the min element from min heap and replace it with the next element.
+	//Run until all log sources are drained.
+	while (true) {
+		// Get the min element and store it in output file (our array)
+		var root = minHeap.pop();
+
+		//console.log(root);
+		if (root == undefined) {
+			break;
+		}
+
+		//push to our output array
+		result.push(root.record);
+
+		//Find the next element that will replace current root of the min heap.
+		//Next element should come from the same log source as the current min
+		//element
+		var record = logSources[root.sourceIndex].pop();
+		if (record != false) {
+			var nextElement = { record: record, sourceIndex: root.sourceIndex };
+			//replace root with the next element of log sourceIndex
+			minHeap.push(nextElement);
+		}
+		//console.log("Pushed next record..." + record);
+	}
+
+	//print results
+	common.printLogs(result, printer);
 };

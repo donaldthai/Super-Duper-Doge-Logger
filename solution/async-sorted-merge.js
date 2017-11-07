@@ -1,4 +1,6 @@
 'use strict'
+var BinaryHeap = require("./BinaryHeap")
+var common = require("./common")
 /*
 ToDo: If we want to handle larger datasets, need to persist data, break down
 into chunks and merge sort from there...like EXTERNAL MERGE SORT.
@@ -11,10 +13,6 @@ For now, we do in-memory storage to handle logs on a smaller scale.
 
 */
 
-// Type 1: In-memory only datastore (no need to load the database)
-var DatastoreAsync = require('nedb')
-var dbAsync = new DatastoreAsync();
-
 /** For Reference...
  * Challenge Number 2!
  *
@@ -25,50 +23,81 @@ var dbAsync = new DatastoreAsync();
 module.exports = (logSources, printer) => {
 	//throw new Error('Not implemented yet!  That part is up to you!')
 
-	function printLogs(logEntries, printer) {
-		for (var j = 0; j < logEntries.length; j++) {
-			printer.print(logEntries[j]);
-		}
-		printer.done();
-	}
+	//sorted logs
+	var result = [];
+	var drainCount = 0; //count increments when log source drained
 
-	//to keep track of how many log sources we've gone through
-	var count = 0;
-	//don't care about sequence, just need to save data then sort
-	logSources.forEach(function(logSource) {
-		//get all log entries for each source
-		var loop = function() {
-			logSource.popAsync().then(function(logEntry) {
-
-				//first check if the source is drained
-				if (logEntry == false) {
-					// sort and print the log entries if ALL log sources are drained
-					if (count == logSources.length - 1) {
-						//sort asc order
-						dbAsync.find({}).sort({ date: 1 }).exec(function (err, docs) {
-							if (err) {
-								console.error(err)
-							}
-							//print logs
-							printLogs(docs, printer);
-						});
-					}
-
-					//increase count to keep track of log source count
-					count++;
-
-					return false;
-				}
-
-				//otherwise, insert data into db
-				dbAsync.insert(logEntry);
-				//loop again
-				loop();
-			});
-		};
-
-		//initial loop
-		loop();
+	// we initialize a new min-heap to sort in-memory.
+	//we pass in a score function that returns a value to be compared.
+	//recordContainer, contains the current record and index of the file
+	//the record came from
+	//recordContainer = { record: ${logEntry}, sourceIndex: ${indexOfLogSource} }
+	var minHeap = new BinaryHeap(
+		function(recordContainer) {
+			return recordContainer.record.date;
 	});
 
+	var printLogs = function(minHeap, result) {
+		while (true) {
+			// Get the min element and store it in output file (our array)
+			var root = minHeap.pop();
+			//console.log(root.record);
+			if (root == undefined) {
+				break;
+			}
+
+			//push to our output array
+			result.push(root.record);
+
+			//Find the next element that will replace current root of the min heap.
+			//Next element should come from the same log source as the current min
+			//element
+			// var record = logSources[root.sourceIndex].popAsync();
+			// if (record != false) {
+			// 	var nextElement = { record: record, sourceIndex: root.sourceIndex };
+			// 	//replace root with the next element of log sourceIndex
+			// 	minHeap.push(nextElement);
+			// }
+			//console.log("Pushed next record..." + root);
+		};
+
+		common.printLogs(result, printer);
+	};
+
+
+	// pop off the first log entry from each log sources
+	var FillMinHeap = function(minHeap, logSources) {
+		var count = 0;
+		logSources.forEach(function(logSource) {
+			logSource.popAsync().then(function(logEntry) {
+				if (logEntry != false) {
+					minHeap.push({ record: logEntry });
+				}
+
+				//increase count to keep track of log count
+				count++;
+
+				if (count == logSources.length) {
+					printLogs(minHeap, result);
+				}
+
+				return false;
+			});
+		});
+	};
+
+
+	/*
+		ToDo: Need to:
+			1. Get each record asynchronously from each logSource
+			2. Push records into heap, sorted
+			3. Pop min record onto "result" file
+			4. PopAsync from same logSource from min record
+			5. Push onto heap
+			6. Repeat 3-5 until heap is empty
+			7. DONE!
+
+			Getting late, did what I could do...
+	*/
+	FillMinHeap(minHeap, logSources);
 };
